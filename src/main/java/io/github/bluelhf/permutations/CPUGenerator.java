@@ -6,30 +6,15 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
-public class CPUGenerator {
+public class CPUGenerator extends Generator {
 
-    private OutputStream outputStream;
     private String charset;
     public CPUGenerator(String charset, OutputStream outputStream) {
-        this.outputStream = outputStream;
+        super(outputStream);
         this.charset = charset;
-    }
-
-    /**
-     * @return This CPUGenerator's output stream
-     */
-    public OutputStream getOutputStream() {
-        return outputStream;
-    }
-    /**
-     * Sets the output stream of this CPUGenerator
-     * @return This CPUGenerator, after modifying the output stream
-     */
-    public CPUGenerator setOutputStream(OutputStream outputStream) {
-        this.outputStream = outputStream;
-        return this;
     }
     /**
      * @return This CPUGenerator's charset
@@ -47,8 +32,6 @@ public class CPUGenerator {
         return this;
     }
 
-
-
     /**
      * Calculates permutations in parallel on the CPU, and writes them to the OutputStream as they are generated.
      * Individual permutations are followed by a newline.
@@ -56,37 +39,61 @@ public class CPUGenerator {
      * @param length The length of the permutations
      * @return A Completable Future to be completed when the operation is complete.
      * */
-    private CompletableFuture<Void> permutations(int length) throws IOException {
+    public GenerationData permutate(int length) {
         int max = (int) Math.pow(charset.length(), length);
 
-        int bucketCount = Utility.getCPUCores();
-        int bucketSize = (int) Math.ceil(max / (double) bucketCount);
+        int threadCount = Utility.getCPUCores();
+        int threadSize = (int) Math.ceil(max / (double) threadCount);
 
         String zeroPad = ("" + charset.charAt(0)).repeat(length);
         ArrayList<CompletableFuture<Void>> futures = new ArrayList<>();
-        BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(outputStream));
+        BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(getOutputStream()));
 
-        for (int b = 0; b < bucketCount; b++) {
+        long started = System.currentTimeMillis();
+
+        GenerationData data = new GenerationData()
+                .setGenerator(this)
+                .setMax(max)
+                .setTimeStarted(started)
+                .setThreadCount(threadCount)
+                .setThreadSize(threadSize);
+
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+
+        for (int b = 0; b < threadCount; b++) {
             final int id = b;
             CompletableFuture<Void> c = CompletableFuture.runAsync(() -> {
-                for (int i = id * bucketSize; i < (id + 1) * bucketSize; i++) {
+                for (int i = id * threadSize; i < (id + 1) * threadSize; i++) {
                     if (i >= max) break;
                     String v = Utility.toBase(i, charset.length(), charset);
                     v = zeroPad.substring(v.length()) + v;
 
+                    double iIncr = i-(id*threadSize);
+                    double iMax = threadSize;
+                    double progress = iIncr/iMax;
+                    data.setProgress(id, progress);
 
                     try {
                         writer.write(v + "\n");
                     } catch (IOException e) {
-                        e.printStackTrace();
+                        e.printStackTrace(System.err);
                     }
-
                 }
-            });
+            }, executor);
 
             futures.add(c);
         }
-        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).thenRun(() -> {
+            try {
+                writer.close();
+                getOutputStream().close();
+                executor.shutdown();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        });
+        data.setThreads(futures);
+        return data;
 
     }
 }
