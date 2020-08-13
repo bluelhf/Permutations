@@ -4,6 +4,7 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -39,13 +40,13 @@ public class CPUGenerator extends Generator {
      * @param length The length of the permutations
      * @return A Completable Future to be completed when the operation is complete.
      * */
-    public GenerationData permutate(int length) {
-        int max = (int) Math.pow(charset.length(), length);
+    public GenerationData permutate(long length) {
+        long max = (long) Math.pow(charset.length(), length);
 
-        int threadCount = Utility.getCPUCores();
-        int threadSize = (int) Math.ceil(max / (double) threadCount);
+        long threadCount = Utility.getCPUCores();
+        long threadSize = (long) Math.ceil(max / (double) threadCount);
 
-        String zeroPad = ("" + charset.charAt(0)).repeat(length);
+        String zeroPad = ("" + charset.charAt(0)).repeat((int) length);
         ArrayList<CompletableFuture<Void>> futures = new ArrayList<>();
         BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(getOutputStream()));
 
@@ -58,19 +59,18 @@ public class CPUGenerator extends Generator {
                 .setThreadCount(threadCount)
                 .setThreadSize(threadSize);
 
-        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        ExecutorService executor = Executors.newFixedThreadPool((int) threadCount);
 
-        for (int b = 0; b < threadCount; b++) {
-            final int id = b;
+        for (long b = 0; b < threadCount; b++) {
+            final long id = b;
             CompletableFuture<Void> c = CompletableFuture.runAsync(() -> {
-                for (int i = id * threadSize; i < (id + 1) * threadSize; i++) {
+                for (long i = id*threadSize; i < (id + 1) * threadSize; i++) {
                     if (i >= max) break;
                     String v = Utility.toBase(i, charset.length(), charset);
                     v = zeroPad.substring(v.length()) + v;
 
                     double iIncr = i-(id*threadSize);
-                    double iMax = threadSize;
-                    double progress = iIncr/iMax;
+                    double progress = iIncr/ (double) threadSize;
                     data.setProgress(id, progress);
 
                     try {
